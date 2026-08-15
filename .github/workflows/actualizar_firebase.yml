@@ -1,0 +1,28 @@
+name: Actualizar Firebase con nuevo JSON
+
+on:
+  push:
+    paths:
+      - '**.json' # Se activa al subir o modificar cualquier archivo .json
+
+jobs:
+  update-firebase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Detectar el archivo JSON más reciente
+        id: get_file
+        run: |
+          LATEST_FILE=$(ls -t *.json 2>/dev/null | head -n 1)
+          echo "Archivo encontrado: $LATEST_FILE"
+          echo "filename=$LATEST_FILE" >> $GITHUB_OUTPUT
+
+      - name: Actualizar Firebase Realtime Database
+        if: steps.get_file.outputs.filename != ''
+        run: |
+          curl -X PATCH \
+            -H "Content-Type: application/json" \
+            -d "{\"latest_json_name\": \"${{ steps.get_file.outputs.filename }}\"}" \
+            "https://TU-PROYECTO-FIREBASE-default-rtdb.firebaseio.com/config.json?auth=${{ secrets.FIREBASE_SECRET }}"

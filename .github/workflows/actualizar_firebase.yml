@@ -1,4 +1,4 @@
-name: Actualizar Remote Config
+name: Actualizar Remote Config Turbo
 on:
   push:
     paths:
@@ -9,45 +9,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: 'Autenticar en Firebase'
+      
+      - name: 'Actualizar Firebase'
+        run: |
+          # 1. Obtener el nombre del archivo
+          FILENAME=$(git log -1 --name-only --pretty="" | grep ".json" | grep -v ".github" | head -n 1)
+          NEW_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/$FILENAME"
+          
+          # 2. Obtener Token de forma rápida usando la llave secreta
+          # Extraemos los datos del JSON
+          CLIENT_EMAIL=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r .client_email)
+          PRIVATE_KEY=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r .private_key)
+          PROJECT_ID=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r .project_id)
+          
+          # Usamos una acción ligera para obtener el token de acceso
+          echo "Generando token para $PROJECT_ID..."
+          
+      - name: 'Auth y Push'
         uses: 'google-github-actions/auth@v2'
+        id: 'auth'
         with:
           credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+          token_format: 'access_token'
 
-      - name: 'Configurar Google Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v2'
-
-      - name: 'Actualizar Remote Config'
+      - name: 'Update via API'
         run: |
-          # 1. Obtener el nombre del archivo que se acaba de subir (excluyendo archivos de sistema)
           FILENAME=$(git log -1 --name-only --pretty="" | grep ".json" | grep -v ".github" | head -n 1)
-          
-          if [ -z "$FILENAME" ]; then
-            echo "No se encontró un archivo JSON válido en el último commit."
-            exit 1
-          fi
-
           NEW_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/$FILENAME"
-          echo "Nueva URL detectada: $NEW_URL"
-          
-          # 2. Obtener el ID del proyecto y el Token
           PROJECT_ID=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r .project_id)
-          TOKEN=$(gcloud auth print-access-token)
           
-          # 3. Descargar la plantilla actual
+          # Descargar y actualizar en un solo paso rápido
           curl -X GET "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
-            -H "Authorization: Bearer $TOKEN" -o config.json
+            -H "Authorization: Bearer ${{ steps.auth.outputs.access_token }}" -o config.json
           
-          # 4. Cambiar la URL_NEW_UPDATE
-          jq --arg url "$NEW_URL" '.parameters.URL_NEW_UPDATE.defaultValue.value = $url' config.json > updated_config.json
+          jq --arg url "$NEW_URL" '.parameters.URL_NEW_UPDATE.defaultValue.value = $url' config.json > updated.json
           
-          # 5. Subir a Firebase
           curl -X PUT "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
-            -H "Authorization: Bearer $TOKEN" \
+            -H "Authorization: Bearer ${{ steps.auth.outputs.access_token }}" \
             -H "Content-Type: application/json" \
-            -H "If-Match: *" -d @updated_config.json
-          
-          echo "¡Firebase actualizado con éxito!"
+            -H "If-Match: *" -d @updated.json

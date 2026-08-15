@@ -2,7 +2,7 @@ name: Actualizar Remote Config
 on:
   push:
     paths:
-      - "**.json" # Se activa al subir un nuevo archivo .json
+      - "**.json"
 
 jobs:
   deploy:
@@ -22,25 +22,32 @@ jobs:
 
       - name: 'Actualizar Remote Config'
         run: |
-          # 1. Obtener el nombre del archivo recién subido
-          FILENAME=$(ls -t *.json | head -n 1)
-          NEW_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/$FILENAME"
+          # 1. Obtener el nombre del archivo que se acaba de subir (excluyendo archivos de sistema)
+          FILENAME=$(git log -1 --name-only --pretty="" | grep ".json" | grep -v ".github" | head -n 1)
           
-          # 2. Obtener el ID del proyecto desde el secreto
+          if [ -z "$FILENAME" ]; then
+            echo "No se encontró un archivo JSON válido en el último commit."
+            exit 1
+          fi
+
+          NEW_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/$FILENAME"
+          echo "Nueva URL detectada: $NEW_URL"
+          
+          # 2. Obtener el ID del proyecto y el Token
           PROJECT_ID=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r .project_id)
           TOKEN=$(gcloud auth print-access-token)
           
-          # 3. Descargar la plantilla actual de Remote Config
+          # 3. Descargar la plantilla actual
           curl -X GET "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
             -H "Authorization: Bearer $TOKEN" -o config.json
           
-          # 4. Cambiar el valor de URL_NEW_UPDATE
+          # 4. Cambiar la URL_NEW_UPDATE
           jq --arg url "$NEW_URL" '.parameters.URL_NEW_UPDATE.defaultValue.value = $url' config.json > updated_config.json
           
-          # 5. Subir la nueva plantilla a Firebase
+          # 5. Subir a Firebase
           curl -X PUT "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
             -H "If-Match: *" -d @updated_config.json
           
-          echo "Firebase actualizado con la URL: $NEW_URL"
+          echo "¡Firebase actualizado con éxito!"

@@ -1,28 +1,46 @@
-name: Actualizar Firebase con nuevo JSON
-
+name: Actualizar Remote Config
 on:
   push:
     paths:
-      - '**.json' # Se activa al subir o modificar cualquier archivo .json
+      - "**.json" # Se activa al subir un nuevo archivo .json
 
 jobs:
-  update-firebase:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Descargar el repositorio
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
-      - name: Detectar el archivo JSON más reciente
-        id: get_file
-        run: |
-          LATEST_FILE=$(ls -t *.json 2>/dev/null | head -n 1)
-          echo "Archivo encontrado: $LATEST_FILE"
-          echo "filename=$LATEST_FILE" >> $GITHUB_OUTPUT
+      - name: 'Autenticar en Firebase'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
 
-      - name: Actualizar Firebase Realtime Database
-        if: steps.get_file.outputs.filename != ''
+      - name: 'Configurar Google Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: 'Actualizar Remote Config'
         run: |
-          curl -X PATCH \
+          # 1. Obtener el nombre del archivo recién subido
+          FILENAME=$(ls -t *.json | head -n 1)
+          NEW_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/$FILENAME"
+          
+          # 2. Obtener el ID del proyecto desde el secreto
+          PROJECT_ID=$(echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r .project_id)
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # 3. Descargar la plantilla actual de Remote Config
+          curl -X GET "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
+            -H "Authorization: Bearer $TOKEN" -o config.json
+          
+          # 4. Cambiar el valor de URL_NEW_UPDATE
+          jq --arg url "$NEW_URL" '.parameters.URL_NEW_UPDATE.defaultValue.value = $url' config.json > updated_config.json
+          
+          # 5. Subir la nueva plantilla a Firebase
+          curl -X PUT "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
+            -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"latest_json_name\": \"${{ steps.get_file.outputs.filename }}\"}" \
-            "https://TU-PROYECTO-FIREBASE-default-rtdb.firebaseio.com/config.json?auth=${{ secrets.FIREBASE_SECRET }}"
+            -H "If-Match: *" -d @updated_config.json
+          
+          echo "Firebase actualizado con la URL: $NEW_URL"

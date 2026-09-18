@@ -31,7 +31,7 @@ jobs:
             -H "Authorization: Bearer ${{ steps.auth.outputs.access_token }}" -o config.json
           
           # 3. Inyectar la nueva URL
-          jq --arg url "$NEW_URL" '.parameters.URL_NEW_UPDATE.defaultValue.value = $url' config.json > updated.json
+          jq --arg url "$NEW_URL" '.parameters.NEW_URL_UPDATE.defaultValue.value = $url' config.json > updated.json
           
           # 4. Subir a Firebase
           curl -X PUT "https://firebaseremoteconfig.googleapis.com/v1/projects/$PROJECT_ID/remoteConfig" \
